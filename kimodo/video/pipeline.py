@@ -44,6 +44,8 @@ def video_to_motion(
     save_intermediates: bool = False,
     device: Optional[str] = None,
     return_numpy: bool = True,
+    chunk_size: Optional[int] = None,
+    chunk_overlap: Optional[int] = None,
 ) -> dict:
     """Run the video -> clean SOMA motion pipeline.
 
@@ -72,6 +74,7 @@ def video_to_motion(
             model=model, soma_in=soma_in, prompt=prompt, strength=strength,
             num_denoising_steps=num_denoising_steps, num_samples=num_samples,
             cfg_weight=cfg_weight, post_processing=post_processing,
+            chunk_size=chunk_size, chunk_overlap=chunk_overlap,
         )
     elif mode == "constraints":
         result = _run_constraints(
@@ -105,7 +108,11 @@ def _run_sdedit(
     num_samples: int,
     cfg_weight: Tuple[float, float],
     post_processing: bool,
+    chunk_size: Optional[int] = None,
+    chunk_overlap: Optional[int] = None,
 ) -> dict:
+    from .chunking import Window, chunk_motion, stitch_chunks
+
     # Encode SOMA motion to Kimodo's normalized feature space.
     encoded = model.motion_rep(
         soma_in.local_rot_mats,
@@ -113,34 +120,54 @@ def _run_sdedit(
         to_normalize=True,
     )
     if encoded.ndim == 2:
-        encoded = encoded.unsqueeze(0)  # add batch dim -> [1, T, D]
-    # Replicate across batch for num_samples.
-    init_motion = encoded.expand(num_samples, -1, -1).contiguous()
+        encoded = encoded.unsqueeze(0)
+    encoded = encoded.expand(num_samples, -1, -1).contiguous()
 
-    # In SDEdit mode, no observed_motion -> force constraint CFG to 0.
+    # Defaults: chunk_size = model.max_frames, overlap = 1 s at model.fps.
+    if chunk_size is None:
+        _max = getattr(model, "max_frames", None)
+        chunk_size = int(_max) if isinstance(_max, int) else encoded.shape[1]
+    if chunk_overlap is None:
+        chunk_overlap = min(int(model.motion_rep.fps), chunk_size - 1)
+
     cfg = (cfg_weight[0], 0.0)
+    total_T = encoded.shape[1]
 
-    # Build the pad_mask, heading, and texts the way Kimodo.__call__ does.
-    T = init_motion.shape[1]
-    pad_mask = torch.ones(num_samples, T, dtype=torch.bool, device=init_motion.device)
-    first_heading_angle = torch.zeros(num_samples, device=init_motion.device)
-    texts = [prompt] * num_samples
+    # Encoded is [B, T, D]. Chunk over the time axis for each batch element.
+    # For simplicity, chunk on the first batch element; replicate slices per sample.
+    chunks = chunk_motion(encoded[0], chunk_size=chunk_size, overlap=chunk_overlap)
 
-    clean = model._generate(
-        texts=texts,
-        max_frames=T,
-        num_denoising_steps=num_denoising_steps,
-        pad_mask=pad_mask,
-        first_heading_angle=first_heading_angle,
-        motion_mask=None,
-        observed_motion=None,
-        cfg_weight=list(cfg),
-        init_motion=init_motion,
-        strength=strength,
-    )
+    if len(chunks) > 1 and num_samples > 1:
+        raise NotImplementedError(
+            "num_samples > 1 combined with long-video chunking is not yet supported. "
+            "Run the pipeline N times for N samples, or pass a shorter video."
+        )
 
-    # Decode back to joint positions and rotations.
-    output = model.motion_rep.inverse(clean, is_normalized=True, return_numpy=False)
+    cleaned_windows = []
+    for win in chunks:
+        win_init = win.motion.unsqueeze(0).expand(num_samples, -1, -1).contiguous()
+        T = win_init.shape[1]
+        pad_mask = torch.ones(num_samples, T, dtype=torch.bool, device=win_init.device)
+        first_heading_angle = torch.zeros(num_samples, device=win_init.device)
+        clean = model._generate(
+            texts=[prompt] * num_samples,
+            max_frames=T,
+            num_denoising_steps=num_denoising_steps,
+            pad_mask=pad_mask,
+            first_heading_angle=first_heading_angle,
+            motion_mask=None,
+            observed_motion=None,
+            cfg_weight=list(cfg),
+            init_motion=win_init,
+            strength=strength,
+        )
+        # Save first batch element back into Window form for stitching.
+        cleaned_windows.append(Window(start=win.start, end=win.end, motion=clean[0]))
+
+    # Stitch back to [T_total, D], then add batch dim.
+    stitched = stitch_chunks(cleaned_windows, total_T=total_T).unsqueeze(0)
+
+    output = model.motion_rep.inverse(stitched, is_normalized=True, return_numpy=False)
 
     if post_processing and "root_positions" in output and "foot_contacts" in output:
         from kimodo.postprocess import post_process_motion
@@ -149,7 +176,7 @@ def _run_sdedit(
             output["root_positions"],
             output["foot_contacts"],
             model.skeleton,
-            [],  # no constraints in SDEdit mode
+            [],
         )
         output.update(corrected)
 
