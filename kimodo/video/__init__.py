@@ -12,11 +12,13 @@ This package is opt-in: install with `pip install kimodo[video]`.
 """
 from __future__ import annotations
 
+from .pipeline import video_to_motion
 from .pose_estimator import PoseEstimator, get_pose_estimator, register_pose_estimator
 from .resample import resample_to_fps
 from .types import SOMAMotion30
 
 __all__ = [
+    "video_to_motion",
     "SOMAMotion30",
     "PoseEstimator",
     "register_pose_estimator",
