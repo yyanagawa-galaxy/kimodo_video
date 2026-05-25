@@ -13,6 +13,7 @@ This package is opt-in: install with `pip install kimodo[video]`.
 from __future__ import annotations
 
 from .pose_estimator import PoseEstimator, get_pose_estimator, register_pose_estimator
+from .resample import resample_to_fps
 from .types import SOMAMotion30
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "PoseEstimator",
     "register_pose_estimator",
     "get_pose_estimator",
+    "resample_to_fps",
 ]
