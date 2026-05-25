@@ -74,7 +74,11 @@ def video_to_motion(
             cfg_weight=cfg_weight, post_processing=post_processing,
         )
     elif mode == "constraints":
-        raise NotImplementedError("constraints mode added in a later task")
+        result = _run_constraints(
+            model=model, soma_in=soma_in, prompt=prompt,
+            num_denoising_steps=num_denoising_steps, num_samples=num_samples,
+            cfg_weight=cfg_weight, post_processing=post_processing,
+        )
     else:
         raise ValueError(f"Unknown mode {mode!r}; expected 'sdedit' or 'constraints'")
 
@@ -150,6 +154,67 @@ def _run_sdedit(
         output.update(corrected)
 
     return output
+
+
+def _run_constraints(
+    *,
+    model,
+    soma_in: SOMAMotion30,
+    prompt: str,
+    num_denoising_steps: int,
+    num_samples: int,
+    cfg_weight: Tuple[float, float],
+    post_processing: bool,
+) -> dict:
+    """Constraints-mode pipeline: feed retargeted SOMA motion as soft full-body constraints."""
+    from kimodo.constraints import EndEffectorConstraintSet, FullBodyConstraintSet
+
+    T = soma_in.num_frames
+    constraint_lst = []
+    for _ in range(num_samples):
+        # Compute posed joints from local rotations + root positions for the constraint.
+        # Forward-kinematics path: delegate to the model's skeleton's FK if available.
+        posed_joints, global_rot_mats = _fk(model.skeleton, soma_in.local_rot_mats, soma_in.root_positions)
+        smooth_root_2d = soma_in.root_positions[..., [0, 2]]
+        full_body = FullBodyConstraintSet(
+            model.skeleton,
+            torch.arange(T),
+            posed_joints,
+            global_rot_mats,
+            smooth_root_2d,
+        )
+        end_eff = EndEffectorConstraintSet(
+            model.skeleton,
+            torch.arange(T),
+            posed_joints,
+            global_rot_mats,
+            smooth_root_2d,
+            joint_names=["LeftHand", "RightHand", "LeftFoot", "RightFoot"],
+        )
+        constraint_lst.append([full_body, end_eff])
+
+    return model(
+        prompts=[prompt] * num_samples,
+        num_frames=[T] * num_samples,
+        num_denoising_steps=num_denoising_steps,
+        constraint_lst=constraint_lst,
+        cfg_weight=list(cfg_weight),
+        num_samples=num_samples,
+        post_processing=post_processing,
+        return_numpy=False,
+    )
+
+
+def _fk(skeleton, local_rot_mats, root_positions):
+    """Forward-kinematics helper. Delegates to the skeleton's FK if available;
+    otherwise falls back to a minimal implementation."""
+    if hasattr(skeleton, "forward_kinematics"):
+        posed, global_rots = skeleton.forward_kinematics(local_rot_mats, root_positions)
+        return posed, global_rots
+    raise NotImplementedError(
+        "skeleton.forward_kinematics is required for constraints mode. "
+        "If your Kimodo skeleton does not expose FK, implement it or use mode='sdedit'."
+    )
 
 
 def _save_output(result: dict, output_path: str) -> None:
