@@ -89,6 +89,13 @@ def video_to_motion(
     if hasattr(model.skeleton, "output_to_SOMASkeleton77"):
         result = model.skeleton.output_to_SOMASkeleton77(result)
 
+    # 6. MediaPipe gives no world translation (hip-centered coords); Kimodo's
+    # diffusion prior fills in invented motion. For animation use, zero the
+    # root so the character animates in place. (If we later support estimators
+    # that DO provide world translation, surface a flag here.)
+    if "root_positions" in result:
+        result["root_positions"] = torch.zeros_like(result["root_positions"])
+
     if output_path is not None:
         _save_output(result, output_path, model=model)
 
