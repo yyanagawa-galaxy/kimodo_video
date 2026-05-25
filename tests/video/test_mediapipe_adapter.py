@@ -2,16 +2,39 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the MediaPipePoseEstimator adapter.
 
-Real-mediapipe end-to-end is left to manual verification; these tests mock cv2 + mediapipe."""
+Real-mediapipe end-to-end is left to manual verification; these tests mock PyAV + mediapipe.
+"""
 from __future__ import annotations
 from unittest.mock import MagicMock, patch
 import pytest
 import torch
+import numpy as np
 
 import kimodo.video.estimators  # noqa: F401 -- register estimators
 from kimodo.video.errors import EstimatorNotInstalledError, NoMotionDetectedError
 from kimodo.video.pose_estimator import get_pose_estimator
 from kimodo.video.types import SOMAMotion30
+
+
+def _make_fake_av(num_frames: int):
+    """Build a MagicMock of the PyAV API surface the adapter uses."""
+    fake_av = MagicMock()
+    container = MagicMock()
+    stream = MagicMock()
+    stream.average_rate = 30.0
+    container.streams.video = [stream]
+
+    # The adapter does: for frame in container.decode(stream):
+    # Each frame has .to_ndarray(format='rgb24')
+    frames = []
+    for _ in range(num_frames):
+        fr = MagicMock()
+        fr.to_ndarray.return_value = np.zeros((480, 640, 3), dtype=np.uint8)
+        frames.append(fr)
+    container.decode.return_value = iter(frames)
+
+    fake_av.open.return_value = container
+    return fake_av
 
 
 def test_mediapipe_is_registered():
@@ -30,16 +53,7 @@ def test_mediapipe_raises_install_error_if_dep_missing():
 def test_mediapipe_raises_no_motion_when_no_landmarks(monkeypatch):
     from kimodo.video.estimators import mediapipe as mp_adapter
 
-    # Mock cv2 with a VideoCapture that returns one frame, then EOF
-    fake_cv2 = MagicMock()
-    cap = MagicMock()
-    cap.get.return_value = 30.0
-    cap.read.side_effect = [(True, MagicMock()), (False, None)]
-    fake_cv2.VideoCapture.return_value = cap
-    fake_cv2.cvtColor.side_effect = lambda f, code: f
-    fake_cv2.COLOR_BGR2RGB = 0
-    fake_cv2.CAP_PROP_FPS = 0
-    monkeypatch.setattr(mp_adapter, "_load_cv2", lambda: fake_cv2)
+    monkeypatch.setattr(mp_adapter, "_load_av", lambda: _make_fake_av(num_frames=1))
 
     # Mock mediapipe so process() returns no landmarks
     fake_mp = MagicMock()
@@ -56,10 +70,11 @@ def test_mediapipe_raises_no_motion_when_no_landmarks(monkeypatch):
 
 
 def test_mediapipe_returns_soma_motion30_with_correct_shapes(monkeypatch):
-    """End-to-end with mocked MediaPipe outputs."""
+    """End-to-end with mocked PyAV + MediaPipe outputs."""
     from kimodo.video.estimators import mediapipe as mp_adapter
 
-    # Build a fake pose_world_landmarks: 33 landmarks, each with x, y, z
+    monkeypatch.setattr(mp_adapter, "_load_av", lambda: _make_fake_av(num_frames=3))
+
     def fake_landmarks():
         result = MagicMock()
         landmark_list = []
@@ -71,17 +86,6 @@ def test_mediapipe_returns_soma_motion30_with_correct_shapes(monkeypatch):
         result.pose_world_landmarks = MagicMock()
         result.pose_world_landmarks.landmark = landmark_list
         return result
-
-    fake_cv2 = MagicMock()
-    cap = MagicMock()
-    cap.get.return_value = 30.0
-    # 3 frames then EOF
-    cap.read.side_effect = [(True, MagicMock()), (True, MagicMock()), (True, MagicMock()), (False, None)]
-    fake_cv2.VideoCapture.return_value = cap
-    fake_cv2.cvtColor.side_effect = lambda f, code: f
-    fake_cv2.COLOR_BGR2RGB = 0
-    fake_cv2.CAP_PROP_FPS = 0
-    monkeypatch.setattr(mp_adapter, "_load_cv2", lambda: fake_cv2)
 
     fake_mp = MagicMock()
     pose_obj = MagicMock()

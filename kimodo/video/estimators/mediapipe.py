@@ -24,9 +24,10 @@ def _load_mediapipe() -> ModuleType:
     return mp
 
 
-def _load_cv2() -> ModuleType:
-    import cv2
-    return cv2
+def _load_av() -> ModuleType:
+    """Lazy import of PyAV (bundled with kimodo). Wrapped so tests can mock."""
+    import av
+    return av
 
 
 class MediaPipePoseEstimator:
@@ -52,12 +53,13 @@ class MediaPipePoseEstimator:
         """
         try:
             mp = _load_mediapipe()
-            cv2 = _load_cv2()
+            av = _load_av()
         except ImportError as exc:
             raise EstimatorNotInstalledError("mediapipe", install_url=_MEDIAPIPE_INSTALL_URL) from exc
 
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        container = av.open(video_path)
+        stream = container.streams.video[0]
+        fps = float(stream.average_rate) if stream.average_rate else 30.0
         try:
             pose = mp.solutions.pose.Pose(
                 static_image_mode=False,
@@ -65,11 +67,8 @@ class MediaPipePoseEstimator:
                 enable_segmentation=False,
             )
             world_landmarks_per_frame: List[List[List[float]]] = []
-            while True:
-                ok, frame = cap.read()
-                if not ok:
-                    break
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            for frame in container.decode(stream):
+                frame_rgb = frame.to_ndarray(format="rgb24")
                 result = pose.process(frame_rgb)
                 if result.pose_world_landmarks is None:
                     continue
@@ -78,7 +77,7 @@ class MediaPipePoseEstimator:
                 )
             pose.close()
         finally:
-            cap.release()
+            container.close()
 
         if not world_landmarks_per_frame:
             raise NoMotionDetectedError(video_path)
