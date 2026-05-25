@@ -20,7 +20,7 @@ def test_cli_defaults_match_python_api():
     args = parse_args(["my_video.mp4"])
     assert args.strength == 0.5
     assert args.mode == "sdedit"
-    assert args.estimator == "gvhmr"
+    assert args.estimator == "mediapipe"
     assert args.num_samples == 1
     assert args.diffusion_steps == 100
     assert args.prompt == ""

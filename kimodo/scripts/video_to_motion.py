@@ -26,8 +26,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                    help="Pipeline mode (default: sdedit)")
     p.add_argument("--model", default="Kimodo-SOMA-RP-v1.1",
                    help="Kimodo model name (default: Kimodo-SOMA-RP-v1.1)")
-    p.add_argument("--estimator", default="gvhmr",
-                   help="Pose estimator (default: gvhmr)")
+    p.add_argument("--estimator", default="mediapipe",
+                   help="Pose estimator (default: mediapipe)")
     p.add_argument("--diffusion_steps", type=int, default=100,
                    help="DDIM steps (default: 100)")
     p.add_argument("--num_samples", type=int, default=1,

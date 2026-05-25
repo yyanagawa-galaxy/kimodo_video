@@ -34,7 +34,7 @@ def video_to_motion(
     prompt: str = "",
     strength: float = 0.5,
     mode: Literal["sdedit", "constraints"] = "sdedit",
-    estimator: str = "gvhmr",
+    estimator: str = "mediapipe",
     num_denoising_steps: int = 100,
     num_samples: int = 1,
     cfg_weight: Tuple[float, float] = (2.0, 0.5),

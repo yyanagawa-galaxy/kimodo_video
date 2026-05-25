@@ -40,8 +40,11 @@ soma = [
   "py-soma-x @ git+https://github.com/NVlabs/SOMA-X.git"
 ]
 video = [
-  "py-soma-x @ git+https://github.com/NVlabs/SOMA-X.git",
-  # GVHMR is installed separately by the user; see kimodo/video/estimators/gvhmr.py
+  "mediapipe>=0.10.18,<0.11",
+  "opencv-python>=4.5",
+  # py-soma-x optional (only used by SMPL-X-based adapters):
+  # pip install "py-soma-x @ git+https://github.com/NVlabs/SOMA-X.git"
+  # GVHMR / sam-body4d / WHAM / 4DHumans installed separately by user
 ]
 all = [
   "viser @ git+https://github.com/nv-tlabs/kimodo-viser.git",
