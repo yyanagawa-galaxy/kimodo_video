@@ -574,6 +574,8 @@ class Kimodo(nn.Module):
         guide_masks: Optional[Dict] = None,
         cfg_type: Optional[str] = None,
         progress_bar=tqdm,
+        init_motion: Optional[torch.Tensor] = None,
+        strength: float = 0.5,
     ) -> torch.Tensor:
         """Sample full denoising loop.
 
@@ -605,15 +607,28 @@ class Kimodo(nn.Module):
         batch_size = text_feat.shape[0]
 
         # sample loop
-        indices = list(range(num_denoising_steps))[::-1]
         shape = (batch_size, max_frames, self.motion_rep.motion_rep_dim)
-        cur_mot = torch.randn(shape, device=self.device)
-        num_denoising_steps = torch.tensor(
+        num_denoising_steps_tensor = torch.tensor(
             [num_denoising_steps], device=self.device
         )  # this and t need to be tensor for onnx export
-        # init diffusion with correct num steps before looping
-        use_timesteps = self.diffusion.space_timesteps(num_denoising_steps[0])[0]
+        use_timesteps = self.diffusion.space_timesteps(num_denoising_steps_tensor[0])[0]
         self.diffusion.calc_diffusion_vars(use_timesteps)
+
+        if init_motion is None:
+            # Existing path: pure-noise init (byte-identical to original behavior).
+            cur_mot = torch.randn(shape, device=self.device)
+            indices = list(range(num_denoising_steps))[::-1]
+        else:
+            # SDEdit path: noise init_motion to step k, denoise from there.
+            k = max(1, int(strength * num_denoising_steps))
+            t_init = torch.full(
+                (batch_size,), k - 1, dtype=torch.long, device=self.device
+            )
+            cur_mot = self.diffusion.q_sample(init_motion, t_init)
+            indices = list(range(k))[::-1]
+
+        # Keep the original local variable name used by the existing loop body.
+        num_denoising_steps = num_denoising_steps_tensor
         for i in progress_bar(indices):
             t = torch.tensor([i] * cur_mot.size(0), device=self.device)
             with torch.inference_mode():
