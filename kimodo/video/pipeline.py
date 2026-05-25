@@ -89,11 +89,11 @@ def video_to_motion(
     if hasattr(model.skeleton, "output_to_SOMASkeleton77"):
         result = model.skeleton.output_to_SOMASkeleton77(result)
 
+    if output_path is not None:
+        _save_output(result, output_path, model=model)
+
     if return_numpy:
         result = to_numpy(result)
-
-    if output_path is not None:
-        _save_output(result, output_path)
 
     return result
 
@@ -244,7 +244,33 @@ def _fk(skeleton, local_rot_mats, root_positions):
     )
 
 
-def _save_output(result: dict, output_path: str) -> None:
-    """Write the motion dict to NPZ. Mirrors kimodo.scripts.generate output format."""
+def _save_output(result: dict, output_path: str, *, model=None) -> None:
+    """Write the motion dict in the format implied by the file extension.
+
+    - .npz: Kimodo NPZ format (via save_kimodo_npz).
+    - .bvh: SOMA BVH with the standard T-pose as rest pose (Blender-friendly).
+            Output is the 77-joint SOMA skeleton. For Unity, import the BVH
+            in Blender first and export as FBX.
+    """
+    from pathlib import Path
+
+    ext = Path(output_path).suffix.lower()
+    if ext == ".bvh":
+        from kimodo.exports.bvh import save_motion_bvh
+        if model is None:
+            raise ValueError("BVH export requires model to provide the skeleton")
+        # result is already SOMA-77 by this point (output_to_SOMASkeleton77 ran).
+        sk77 = model.skeleton.somaskel77 if hasattr(model.skeleton, "somaskel77") else model.skeleton
+        save_motion_bvh(
+            output_path,
+            result["local_rot_mats"],
+            result["root_positions"],
+            skeleton=sk77,
+            fps=int(model.motion_rep.fps),
+            standard_tpose=True,  # always use the standard T-pose as the rest pose
+        )
+        return
+
+    # Default: NPZ
     from kimodo.exports.motion_io import save_kimodo_npz
     save_kimodo_npz(result, output_path)
