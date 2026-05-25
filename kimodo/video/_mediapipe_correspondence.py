@@ -14,7 +14,15 @@ def synthesize_soma30_positions(mp_landmarks: torch.Tensor) -> torch.Tensor:
     Returns:
         [T, 30, 3] SOMA-30 joint positions.
     """
-    lm = mp_landmarks  # alias; shape [T, 33, 3]
+    # MediaPipe's pose_world_landmarks use image-style axes:
+    #   +X: subject's left, +Y: down (head-to-feet), +Z: away from camera
+    # SOMA uses Y-up right-handed coordinates:
+    #   +X: subject's left (kept), +Y: up, +Z: forward (toward subject's front)
+    # To convert: flip Y (down->up) and flip Z (handedness adjustment so
+    # left/right limbs aren't mirrored after Y flip).
+    lm = mp_landmarks.clone()
+    lm[..., 1] = -lm[..., 1]
+    lm[..., 2] = -lm[..., 2]
 
     def mid(a: int, b: int) -> torch.Tensor:
         return 0.5 * (lm[:, a, :] + lm[:, b, :])
