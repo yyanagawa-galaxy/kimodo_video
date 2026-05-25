@@ -90,14 +90,13 @@ def stitch_chunks(windows: List[Window], total_T: int) -> torch.Tensor:
 
 
 def _raised_cosine(length: int, *, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-    """A raised-cosine window of `length` frames in [0, 1]. Symmetric, ends at small nonzero."""
+    """A raised-cosine (Hann) window of `length` frames, shifted to [0.1, 1].
+
+    Symmetric; ends at 0.1 (a small nonzero floor that keeps stitch_chunks
+    well-behaved at motion boundaries where only one window contributes).
+    """
     if length == 1:
         return torch.ones(1, device=device, dtype=dtype)
     n = torch.arange(length, device=device, dtype=dtype)
-    # Half-period cosine that avoids zero: 0.5 - 0.5*cos gives 0→1, but we shift to avoid 0
-    # Use (1 + cos(pi + pi*n/(length-1))) / 2 = (1 - cos(pi*n/(length-1))) / 2
-    # which goes from 0 to 1. To make it stay positive, use (2 + cos(pi*n/(length-1))) / 3
-    # which goes from 1 to 1/3. Normalize to [0.1, 1] range: scale and shift
-    base = 0.5 - 0.5 * torch.cos(math.pi * n / (length - 1))  # [0, 1]
-    # Shift upward so minimum is 0.1: 0.1 + 0.9 * base
-    return 0.1 + 0.9 * base
+    hann = 0.5 - 0.5 * torch.cos(2 * math.pi * n / (length - 1))  # [0, 1] symmetric
+    return 0.1 + 0.9 * hann  # [0.1, 1] symmetric
