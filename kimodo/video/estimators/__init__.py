@@ -8,4 +8,4 @@ Importing this package triggers registration of every bundled adapter
 """
 from __future__ import annotations
 
-from . import fourdhumans, gem, gvhmr, wham  # noqa: F401 — import triggers registration
+from . import fourdhumans, gem, gvhmr, mediapipe, wham  # noqa: F401 -- import triggers registration
